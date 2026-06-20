@@ -102,7 +102,7 @@ button:disabled {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr);
+  grid-template-columns: minmax(0, 1fr) minmax(280px, .75fr) minmax(280px, .75fr);
   gap: 16px;
   min-height: 0;
 }
@@ -124,7 +124,8 @@ button:disabled {
 }
 
 .transcript,
-.flags {
+.flags,
+.facts {
   padding: 16px;
   overflow: auto;
 }
@@ -167,10 +168,43 @@ button:disabled {
   border-color: var(--gray);
 }
 
+.fact {
+  border-left: 4px solid var(--gray);
+  padding: 12px;
+  margin-bottom: 10px;
+  background: #fafafa;
+  border-radius: 0 8px 8px 0;
+}
+
+.fact.supported {
+  border-color: var(--green);
+}
+
+.fact.contradicted {
+  border-color: var(--red);
+}
+
+.fact.unclear,
+.fact.checking {
+  border-color: var(--amber);
+}
+
 .flag h3 {
   margin: 0 0 6px;
   font-size: 14px;
   text-transform: capitalize;
+}
+
+.fact h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  text-transform: capitalize;
+}
+
+.source {
+  color: var(--blue);
+  font-size: 12px;
+  word-break: break-word;
 }
 
 .quote {

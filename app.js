@@ -51,11 +51,20 @@ const rules = [
 
 let segments = [];
 let flags = [];
+let facts = [];
 let recognition;
+let recorder;
+let mediaStream;
+let streamSocket;
+let micActive = false;
 let analyzeTimer;
+let factTimer;
 let demoTimer;
 let lastAnalyzed = 0;
+let lastFactChecked = 0;
 let partialText = "";
+let deepgramFailed = false;
+let factChecking = false;
 
 const isBrowser = typeof document !== "undefined";
 const $ = (id) => document.getElementById(id);
@@ -63,6 +72,7 @@ const $ = (id) => document.getElementById(id);
 const statusEl = isBrowser ? $("status") : null;
 const transcriptEl = isBrowser ? $("transcript") : null;
 const flagsEl = isBrowser ? $("flags") : null;
+const factsEl = isBrowser ? $("facts") : null;
 const startBtn = isBrowser ? $("startBtn") : null;
 const stopBtn = isBrowser ? $("stopBtn") : null;
 const demoBtn = isBrowser ? $("demoBtn") : null;
@@ -121,10 +131,15 @@ function setRunning(running, label) {
 function resetSession() {
   segments = [];
   flags = [];
+  facts = [];
   partialText = "";
+  deepgramFailed = false;
   lastAnalyzed = 0;
+  lastFactChecked = 0;
+  factChecking = false;
   renderTranscript();
   renderFlags();
+  renderFacts();
   updateScores({ clarity: 7, evidence: 7, logic: 7, responsiveness: 7, civility: 7 });
   $("summary").textContent = "Analysis appears every 15 seconds and after Stop.";
 }
@@ -186,6 +201,30 @@ function renderFlags() {
   $("flagCount").textContent = `${flags.length} flag${flags.length === 1 ? "" : "s"}`;
 }
 
+function renderFacts() {
+  factsEl.innerHTML = "";
+  const latest = facts.slice(-5).reverse();
+  if (!latest.length) {
+    factsEl.innerHTML = '<p class="empty">No claims checked yet.</p>';
+  } else {
+    for (const fact of latest) {
+      const card = document.createElement("article");
+      card.className = `fact ${fact.verdict}`;
+      const sources = (fact.sources || []).slice(0, 2).map((source) =>
+        `<p class="source"><a href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">${escapeHtml(source.title || source.url)}</a></p>`
+      ).join("");
+      card.innerHTML = `
+        <h3>${escapeHtml(fact.verdict)}</h3>
+        <p class="quote">"${escapeHtml(fact.claim)}"</p>
+        <p>${escapeHtml(fact.explanation)}</p>
+        ${sources}
+      `;
+      factsEl.append(card);
+    }
+  }
+  $("factCount").textContent = `${facts.length} checked`;
+}
+
 function updateScores(scores) {
   for (const [key, value] of Object.entries(scores)) {
     const row = document.querySelector(`.score[data-key="${key}"]`);
@@ -194,13 +233,29 @@ function updateScores(scores) {
   }
 }
 
-function runAnalysis(force = false) {
+async function runAnalysis(force = false) {
   const newSegments = segments.slice(lastAnalyzed);
   const recentTranscript = newSegments.map((s) => s.text).join(" ");
   if (!force && words(recentTranscript).length < 25) return;
 
   const contextTranscript = segments.slice(-12).map((s) => s.text).join(" ");
-  const result = analyzeTranscript(recentTranscript || contextTranscript, contextTranscript, flags);
+  const payload = {
+    recentTranscript: recentTranscript || contextTranscript,
+    contextTranscript,
+    previousFlags: flags.slice(-10).map((flag) => `${flag.type}: ${flag.quote}`)
+  };
+  let result;
+  try {
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error("AI analysis unavailable.");
+    result = await response.json();
+  } catch {
+    result = analyzeTranscript(payload.recentTranscript, contextTranscript, flags);
+  }
   flags = flags.concat(result.flags).slice(-20);
   lastAnalyzed = segments.length;
   renderFlags();
@@ -208,9 +263,110 @@ function runAnalysis(force = false) {
   $("summary").textContent = result.summary;
 }
 
+async function runFactCheck(force = false) {
+  if (factChecking) return;
+  const newSegments = segments.slice(lastFactChecked);
+  const recentTranscript = newSegments.map((s) => s.text).join(" ");
+  if (!force && words(recentTranscript).length < 35) return;
+
+  factChecking = true;
+  try {
+    const response = await fetch("/api/fact-check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recentTranscript: recentTranscript || segments.slice(-8).map((s) => s.text).join(" "),
+        contextTranscript: segments.slice(-16).map((s) => s.text).join(" "),
+        previousClaims: facts.slice(-10).map((fact) => fact.claim)
+      })
+    });
+    if (!response.ok) throw new Error("Fact check unavailable.");
+    const fact = await response.json();
+    if (fact.claim) {
+      facts = facts.concat(fact).slice(-20);
+      renderFacts();
+    }
+    lastFactChecked = segments.length;
+  } catch {
+    lastFactChecked = segments.length;
+  } finally {
+    factChecking = false;
+  }
+}
+
 function startMic() {
   stopAll(false);
   resetSession();
+  if (navigator.mediaDevices && window.MediaRecorder) {
+    startDeepgramMic();
+    return;
+  }
+
+  startBrowserMic();
+}
+
+async function startDeepgramMic() {
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micActive = true;
+    startDeepgramStream();
+  } catch {
+    startBrowserMic();
+  }
+}
+
+function startDeepgramStream() {
+  streamSocket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/transcribe-stream`);
+  streamSocket.onopen = () => {
+    const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]
+      .find((type) => MediaRecorder.isTypeSupported(type));
+    recorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
+    recorder.ondataavailable = (event) => {
+      if (event.data.size && streamSocket?.readyState === WebSocket.OPEN) streamSocket.send(event.data);
+    };
+    recorder.onerror = () => {
+      statusEl.textContent = "Deepgram recording failed.";
+      stopAll(false);
+    };
+    recorder.start(250);
+    analyzeTimer = setInterval(() => runAnalysis(false), 15000);
+    factTimer = setInterval(() => runFactCheck(false), 30000);
+    setRunning(true, "Streaming with Deepgram Nova-3");
+  };
+  streamSocket.onmessage = (event) => {
+    try {
+      const result = JSON.parse(event.data);
+      if (result.error) throw new Error(result.error);
+      const transcript = result.channel?.alternatives?.[0]?.transcript?.trim();
+      if (!transcript) return;
+      if (result.is_final) {
+        partialText = "";
+        addSegment(transcript);
+        runAnalysis(false);
+      } else {
+        partialText = transcript;
+        renderTranscript();
+      }
+    } catch (error) {
+      deepgramFailed = true;
+      stopAll(false);
+      statusEl.textContent = error.message;
+    }
+  };
+  streamSocket.onerror = () => {
+    deepgramFailed = true;
+    stopAll(false);
+    statusEl.textContent = "Deepgram stream failed.";
+  };
+  streamSocket.onclose = () => {
+    if (micActive && !deepgramFailed) {
+      stopAll(false);
+      statusEl.textContent = "Deepgram stream closed.";
+    }
+  };
+}
+
+function startBrowserMic() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
     statusEl.textContent = "Speech recognition unavailable. Running demo.";
@@ -237,6 +393,7 @@ function startMic() {
   recognition.onend = () => clearInterval(analyzeTimer);
   recognition.start();
   analyzeTimer = setInterval(() => runAnalysis(false), 15000);
+  factTimer = setInterval(() => runFactCheck(false), 30000);
   setRunning(true, "Listening");
 }
 
@@ -248,19 +405,29 @@ function startDemo() {
   demoTimer = setInterval(() => {
     addSegment(demoLines[index]);
     runAnalysis(true);
+    runFactCheck(true);
     index++;
     if (index === demoLines.length) stopAll(true);
   }, 1800);
 }
 
 function stopAll(finalize = true) {
+  micActive = false;
   if (recognition) recognition.stop();
+  if (recorder && recorder.state !== "inactive") recorder.stop();
+  if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
   clearInterval(analyzeTimer);
+  clearInterval(factTimer);
   clearInterval(demoTimer);
   recognition = null;
+  recorder = null;
+  mediaStream = null;
+  if (streamSocket && streamSocket.readyState <= WebSocket.OPEN) streamSocket.close();
+  streamSocket = null;
   partialText = "";
   renderTranscript();
   if (finalize) runAnalysis(true);
+  if (finalize) runFactCheck(true);
   setRunning(false, segments.length ? "Stopped" : "Ready");
 }
 
