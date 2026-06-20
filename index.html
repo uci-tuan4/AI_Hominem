@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Hominem</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div>
+        <h1>AI Hominem</h1>
+        <p id="status">Ready</p>
+      </div>
+      <div class="controls" aria-label="Debate controls">
+        <button id="startBtn" type="button">Start</button>
+        <button id="stopBtn" type="button" disabled>Stop</button>
+        <button id="demoBtn" type="button">Demo</button>
+      </div>
+    </header>
+
+    <section class="workspace" aria-label="Live debate coach">
+      <section class="panel transcript-panel">
+        <div class="panel-title">
+          <h2>Live Transcript</h2>
+          <span id="wordCount">0 words</span>
+        </div>
+        <div id="transcript" class="transcript" aria-live="polite">
+          <p class="empty">Start the mic or run the demo.</p>
+        </div>
+      </section>
+
+      <section class="panel flags-panel">
+        <div class="panel-title">
+          <h2>Live Flags</h2>
+          <span id="flagCount">0 flags</span>
+        </div>
+        <div id="flags" class="flags" aria-live="polite">
+          <p class="empty">No issues flagged yet.</p>
+        </div>
+      </section>
+    </section>
+
+    <section class="scorecard" aria-label="Speaker scorecard">
+      <div class="score" data-key="clarity"><strong>Clarity</strong><meter min="0" max="10" value="7"></meter><span>7</span></div>
+      <div class="score" data-key="evidence"><strong>Evidence</strong><meter min="0" max="10" value="7"></meter><span>7</span></div>
+      <div class="score" data-key="logic"><strong>Logic</strong><meter min="0" max="10" value="7"></meter><span>7</span></div>
+      <div class="score" data-key="responsiveness"><strong>Answering</strong><meter min="0" max="10" value="7"></meter><span>7</span></div>
+      <div class="score" data-key="civility"><strong>Civility</strong><meter min="0" max="10" value="7"></meter><span>7</span></div>
+    </section>
+
+    <section class="summary" aria-label="Final summary">
+      <h2>Summary</h2>
+      <p id="summary">Analysis appears every 15 seconds and after Stop.</p>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
