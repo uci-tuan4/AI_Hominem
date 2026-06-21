@@ -38,7 +38,7 @@ function createTray() {
   tray = new Tray(icon);
   tray.setToolTip("AI Hominem");
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Show AI Hominem", click: () => mainWindow?.show() },
+    { label: "Show AI Hominem", click: showMainWindow },
     { label: "Hide", click: () => mainWindow?.hide() },
     { type: "separator" },
     {
@@ -49,7 +49,14 @@ function createTray() {
       }
     }
   ]));
-  tray.on("click", () => mainWindow?.show());
+  tray.on("click", showMainWindow);
+}
+
+function showMainWindow() {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
 }
 
 async function createWindow() {
@@ -89,7 +96,7 @@ app.whenReady().then(async () => {
   await createWindow();
 });
 
-app.on("activate", () => mainWindow?.show());
+app.on("activate", showMainWindow);
 app.on("before-quit", () => {
   isQuitting = true;
   server?.close();
@@ -104,14 +111,19 @@ function notifyWithAppleScript(title, body) {
 ipcMain.handle("notify-flag", (_event, flag) => {
   const title = `AI Hominem: ${String(flag.type || "flag").replaceAll("_", " ")}`;
   const body = flag.followUp || "What is the strongest answer to this?";
+  // Native Electron notifications silently no-op in an unpackaged dev app on
+  // macOS (no bundle id / notification authorization), so route macOS through
+  // AppleScript, which works regardless.
   if (process.platform === "darwin") {
     notifyWithAppleScript(title, body);
     return true;
   }
   if (!Notification.isSupported()) return false;
-  new Notification({
+  const notification = new Notification({
     title,
     body
-  }).show();
+  });
+  notification.on("click", showMainWindow);
+  notification.show();
   return true;
 });

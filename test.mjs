@@ -17,6 +17,7 @@ assert(electronMain.includes("backgroundThrottling: false"));
 assert(electronMain.includes("setDisplayMediaRequestHandler"));
 assert(electronMain.includes("new Notification("));
 assert(electronMain.includes('display notification ${quotedBody} with title ${quotedTitle}'));
+assert(electronMain.includes('notification.on("click", showMainWindow)'));
 assert(electronMain.includes('const title = `AI Hominem: ${String(flag.type || "flag").replaceAll("_", " ")}`'));
 assert(electronMain.includes('const body = flag.followUp || "What is the strongest answer to this?"'));
 assert(electronPreload.includes("notifyFlag"));
@@ -33,6 +34,12 @@ assert(result.flags.some((flag) => flag.type === "slippery_slope"));
 const shortUnsupported = analyzeTranscript("AI destroys creativity.", "AI destroys creativity.", []);
 assert(shortUnsupported.flags.some((flag) => flag.type === "unsupported_claim"));
 assert.deepEqual(normalizeAnalysis({ flags: ["Factual inaccuracy"] }).flags, []);
+const confidenceFlags = { flags: [
+  { type: "unsupported_claim", quote: "a", confidence: 0.9 },
+  { type: "unsupported_claim", quote: "b", confidence: 0.5 }
+] };
+assert.equal(normalizeAnalysis(confidenceFlags).flags.length, 2);
+assert.equal(normalizeAnalysis(confidenceFlags, 0.6).flags.length, 1);
 assert.equal(mergeNewFlags(shortUnsupported.flags, shortUnsupported.flags).length, 0);
 assert.equal(mergeNewFlags(shortUnsupported.flags, [{
   ...shortUnsupported.flags[0],
