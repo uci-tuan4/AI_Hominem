@@ -23,6 +23,27 @@ const claimSchema = {
   },
   required: ["claim"]
 };
+const analysisSchema = {
+  type: "object",
+  properties: {
+    flags: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          type: { type: "string" },
+          quote: { type: "string" },
+          severity: { type: "string", enum: ["low", "medium", "high"] },
+          confidence: { type: "number" },
+          explanation: { type: "string" },
+          followUp: { type: "string" }
+        },
+        required: ["type", "quote", "severity", "confidence", "explanation", "followUp"]
+      }
+    }
+  },
+  required: ["flags"]
+};
 const factCheckSchema = {
   type: "object",
   properties: {
@@ -87,6 +108,11 @@ export function deepgramListenUrl() {
 
 export function browserbaseEnabled() {
   return Boolean(process.env.BROWSERBASE_API_KEY);
+}
+
+export function shouldSkipFactCheck(claim) {
+  const text = String(claim || "").toLowerCase();
+  return /moon .*made of .*cheese|earth .*flat|pigs .*fly|sky .*green|sun .*cold/.test(text);
 }
 
 async function wsDataToString(data) {
@@ -239,17 +265,11 @@ async function transcribe(req, res) {
   json(res, 200, { transcript: extractDeepgramTranscript(result) });
 }
 
-function normalizeAnalysis(value) {
+export function normalizeAnalysis(value) {
   return {
-    flags: Array.isArray(value?.flags) ? value.flags.slice(0, 5) : [],
-    scores: {
-      clarity: Number(value?.scores?.clarity) || 7,
-      evidence: Number(value?.scores?.evidence) || 7,
-      logic: Number(value?.scores?.logic) || 7,
-      responsiveness: Number(value?.scores?.responsiveness) || 7,
-      civility: Number(value?.scores?.civility) || 7
-    },
-    summary: typeof value?.summary === "string" ? value.summary : "No analysis returned."
+    flags: Array.isArray(value?.flags)
+      ? value.flags.filter((flag) => flag?.type && flag?.quote).slice(0, 5)
+      : []
   };
 }
 
@@ -280,37 +300,14 @@ async function analyze(req, res) {
   }
 
   const payload = JSON.parse((await readBody(req)).toString() || "{}");
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": `http://${host}:${port}`,
-      "X-Title": "AI Hominem"
+  const result = await openRouterJson([
+    {
+      role: "system",
+      content: "You are a live debate coach. Flag factual claims stated without evidence as unsupported_claim, even if fact-checking handles truth separately. Use only concise flag objects."
     },
-    body: JSON.stringify({
-      model: openRouterModelId(),
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: "You are a live debate coach. Return strict JSON with flags, scores, and summary. Flag only clear reasoning issues. Be concise and fair."
-        },
-        {
-          role: "user",
-          content: JSON.stringify(payload)
-        }
-      ]
-    })
-  });
-  const result = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    json(res, 502, { error: result.error?.message || "OpenRouter analysis failed." });
-    return;
-  }
-
-  json(res, 200, normalizeAnalysis(JSON.parse(result.choices?.[0]?.message?.content || "{}")));
+    { role: "user", content: JSON.stringify(payload) }
+  ], analysisSchema);
+  json(res, 200, normalizeAnalysis(result));
 }
 
 async function browserbase(path, body) {
@@ -341,12 +338,12 @@ async function factCheck(req, res) {
   const { claim } = await openRouterJson([
     {
       role: "system",
-      content: "Pick one specific factual claim worth checking from the transcript. Return an empty claim if there is no concrete, externally verifiable claim."
+      content: "Pick one non-obvious factual claim worth checking from the transcript. Return an empty claim for jokes, insults, common knowledge, obvious falsehoods, or trivia. Prefer claims about numbers, dates, policies, studies, laws, prices, current events, science details, or named entities."
     },
     { role: "user", content: JSON.stringify(payload) }
   ], claimSchema);
-  if (!claim) {
-    json(res, 200, { claim: "", verdict: "unclear", explanation: "No checkable factual claim found.", sources: [] });
+  if (!claim || shouldSkipFactCheck(claim)) {
+    json(res, 200, { claim: "", verdict: "unclear", explanation: "No non-obvious claim to check.", sources: [] });
     return;
   }
 
@@ -364,12 +361,12 @@ async function factCheck(req, res) {
   const verdict = await openRouterJson([
     {
       role: "system",
-      content: "Fact-check the claim using only the provided source excerpts. Return supported, contradicted, or unclear. Keep the explanation under 35 words."
+      content: "Fact-check using only the provided source excerpts. Return supported, contradicted, or unclear. Keep explanation under 12 words."
     },
     { role: "user", content: JSON.stringify({ claim, sources: pages }) }
   ], factCheckSchema);
 
-  json(res, 200, { claim, ...verdict, sources: verdict.sources?.length ? verdict.sources : sources });
+  json(res, 200, { claim, ...verdict, sources: (verdict.sources?.length ? verdict.sources : sources).slice(0, 1) });
 }
 
 export function handleRequest(req, res) {

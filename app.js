@@ -19,7 +19,8 @@ const rules = [
     type: "unsupported_claim",
     severity: "medium",
     confidence: 0.72,
-    test: /clearly|everyone|nobody|never|always|useless/i,
+    test: /clearly|obviously|everyone|nobody|never|always|useless|causes?|proves?|guarantees?|destroys?|fixes?|leads to|makes .* (better|worse|useless|dangerous)/i,
+    skip: /stupid|ignorant|idiot|moron/i,
     explanation: "Makes a broad claim without support.",
     followUp: "What data or source supports that claim?"
   },
@@ -56,6 +57,7 @@ let recognition;
 let recorder;
 let mediaStream;
 let streamSocket;
+let currentMode = "mic";
 let micActive = false;
 let analyzeTimer;
 let factTimer;
@@ -64,7 +66,9 @@ let lastAnalyzed = 0;
 let lastFactChecked = 0;
 let partialText = "";
 let deepgramFailed = false;
+let analyzing = false;
 let factChecking = false;
+const minAnalysisWords = 3;
 
 const isBrowser = typeof document !== "undefined";
 const $ = (id) => document.getElementById(id);
@@ -76,9 +80,81 @@ const factsEl = isBrowser ? $("facts") : null;
 const startBtn = isBrowser ? $("startBtn") : null;
 const stopBtn = isBrowser ? $("stopBtn") : null;
 const demoBtn = isBrowser ? $("demoBtn") : null;
+const modeButtons = isBrowser ? Array.from(document.querySelectorAll(".mode")) : [];
 
 function words(text) {
   return text.trim().split(/\s+/).filter(Boolean);
+}
+
+function isFlag(flag) {
+  return flag && flag.type && flag.quote;
+}
+
+function flagKey(flag) {
+  return `${flag.type}:${normalizeQuote(flag.quote)}`;
+}
+
+function normalizeQuote(quote) {
+  return String(quote || "").toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function flagRank(flag) {
+  const severity = { high: 3, medium: 2, low: 1 }[flag.severity] || 0;
+  return severity + (Number(flag.confidence) || 0);
+}
+
+function overlaps(a, b) {
+  return a === b || (a.length > 8 && b.includes(a)) || (b.length > 8 && a.includes(b));
+}
+
+export function mergeNewFlags(existingFlags, candidateFlags) {
+  const merged = existingFlags.filter(isFlag).map((flag) => ({ flag, existing: true }));
+
+  for (const flag of candidateFlags.filter(isFlag)) {
+    const quote = normalizeQuote(flag.quote);
+    const index = merged.findIndex((item) =>
+      item.flag.type === flag.type && overlaps(normalizeQuote(item.flag.quote), quote)
+    );
+    if (index === -1) {
+      merged.push({ flag, existing: false });
+    } else if (!merged[index].existing && flagRank(flag) > flagRank(merged[index].flag)) {
+      merged[index] = { flag, existing: false };
+    }
+  }
+
+  return merged.filter((item) => !item.existing).map((item) => item.flag).slice(0, 5);
+}
+
+function clip(text, max = 90) {
+  const value = String(text || "");
+  return value.length > max ? `${value.slice(0, max - 1)}...` : value;
+}
+
+function flagTitle(flag) {
+  return String(flag.type || "flag").replaceAll("_", " ");
+}
+
+function counterQuestion(flag) {
+  return flag.followUp || "What is the strongest answer to this?";
+}
+
+async function notifyFlags(newFlags) {
+  for (const flag of newFlags) {
+    if (window.aiHominem?.notifyFlag) {
+      window.aiHominem.notifyFlag(flag);
+    } else if ("Notification" in window && Notification.permission === "granted") {
+      new Notification(`AI Hominem: ${flagTitle(flag)}`, {
+        body: counterQuestion(flag)
+      });
+    } else if ("Notification" in window && Notification.permission === "default") {
+      const permission = await Notification.requestPermission();
+      if (permission === "granted") {
+        new Notification(`AI Hominem: ${flagTitle(flag)}`, {
+          body: counterQuestion(flag)
+        });
+      }
+    }
+  }
 }
 
 export function analyzeTranscript(recentTranscript, contextTranscript = recentTranscript, previousFlags = []) {
@@ -87,6 +163,7 @@ export function analyzeTranscript(recentTranscript, contextTranscript = recentTr
 
   for (const rule of rules) {
     if (!rule.test.test(recentTranscript)) continue;
+    if (rule.skip?.test(recentTranscript)) continue;
     const sentence = recentTranscript.split(/[.!?]/).find((part) => rule.test.test(part)) || recentTranscript;
     const quote = sentence.trim().slice(0, 140);
     const key = `${rule.type}:${quote.toLowerCase()}`;
@@ -101,24 +178,8 @@ export function analyzeTranscript(recentTranscript, contextTranscript = recentTr
     });
   }
 
-  const penalty = found.reduce((sum, flag) => sum + (flag.severity === "high" ? 2 : flag.severity === "medium" ? 1.25 : .75), 0);
-  const evidencePenalty = found.some((flag) => flag.type === "unsupported_claim" || flag.type === "anecdotal_evidence") ? 2 : 0;
-  const logicPenalty = found.some((flag) => flag.type === "false_dilemma" || flag.type === "slippery_slope") ? 2 : 0;
-  const civilityPenalty = found.some((flag) => flag.type === "ad_hominem") ? 2 : 0;
-  const clarity = Math.max(1, Math.round(8 - penalty / 2));
-
   return {
-    flags: found.slice(0, 5),
-    scores: {
-      clarity,
-      evidence: Math.max(1, 8 - evidencePenalty - Math.round(penalty / 3)),
-      logic: Math.max(1, 8 - logicPenalty - Math.round(penalty / 3)),
-      responsiveness: Math.max(1, contextTranscript.includes("?") ? 7 : 6),
-      civility: Math.max(1, 9 - civilityPenalty)
-    },
-    summary: found.length
-      ? `Flagged ${found.length} issue${found.length === 1 ? "" : "s"} in the latest argument.`
-      : "No clear reasoning issues in the latest chunk."
+    flags: found.slice(0, 5)
   };
 }
 
@@ -126,6 +187,17 @@ function setRunning(running, label) {
   statusEl.textContent = label;
   startBtn.disabled = running;
   stopBtn.disabled = !running;
+  modeButtons.forEach((button) => {
+    button.disabled = running;
+  });
+}
+
+function setMode(mode) {
+  currentMode = mode;
+  modeButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.mode === mode);
+  });
+  statusEl.textContent = mode === "desktop" ? "Ready for desktop audio" : "Ready for mic audio";
 }
 
 function resetSession() {
@@ -140,8 +212,6 @@ function resetSession() {
   renderTranscript();
   renderFlags();
   renderFacts();
-  updateScores({ clarity: 7, evidence: 7, logic: 7, responsiveness: 7, civility: 7 });
-  $("summary").textContent = "Analysis appears every 15 seconds and after Stop.";
 }
 
 function addSegment(text, isFinal = true) {
@@ -210,13 +280,13 @@ function renderFacts() {
     for (const fact of latest) {
       const card = document.createElement("article");
       card.className = `fact ${fact.verdict}`;
-      const sources = (fact.sources || []).slice(0, 2).map((source) =>
+      const sources = (fact.sources || []).slice(0, 1).map((source) =>
         `<p class="source"><a href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">${escapeHtml(source.title || source.url)}</a></p>`
       ).join("");
       card.innerHTML = `
         <h3>${escapeHtml(fact.verdict)}</h3>
-        <p class="quote">"${escapeHtml(fact.claim)}"</p>
-        <p>${escapeHtml(fact.explanation)}</p>
+        <p>${escapeHtml(clip(fact.explanation, 80))}</p>
+        <p class="meta">${escapeHtml(clip(fact.claim, 80))}</p>
         ${sources}
       `;
       factsEl.append(card);
@@ -225,42 +295,41 @@ function renderFacts() {
   $("factCount").textContent = `${facts.length} checked`;
 }
 
-function updateScores(scores) {
-  for (const [key, value] of Object.entries(scores)) {
-    const row = document.querySelector(`.score[data-key="${key}"]`);
-    row.querySelector("meter").value = value;
-    row.querySelector("span").textContent = value;
-  }
-}
-
 async function runAnalysis(force = false) {
+  if (analyzing) return;
   const newSegments = segments.slice(lastAnalyzed);
   const recentTranscript = newSegments.map((s) => s.text).join(" ");
-  if (!force && words(recentTranscript).length < 25) return;
+  if (!force && words(recentTranscript).length < minAnalysisWords) return;
 
+  analyzing = true;
   const contextTranscript = segments.slice(-12).map((s) => s.text).join(" ");
   const payload = {
     recentTranscript: recentTranscript || contextTranscript,
     contextTranscript,
     previousFlags: flags.slice(-10).map((flag) => `${flag.type}: ${flag.quote}`)
   };
+  const localResult = analyzeTranscript(payload.recentTranscript, contextTranscript, flags);
   let result;
   try {
-    const response = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if (!response.ok) throw new Error("AI analysis unavailable.");
-    result = await response.json();
-  } catch {
-    result = analyzeTranscript(payload.recentTranscript, contextTranscript, flags);
+    try {
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) throw new Error("AI analysis unavailable.");
+      result = await response.json();
+    } catch {
+      result = localResult;
+    }
+    result.flags = mergeNewFlags(flags, localResult.flags.concat(result.flags || []));
+    flags = flags.concat(result.flags).slice(-20);
+    lastAnalyzed = segments.length;
+    renderFlags();
+    notifyFlags(result.flags);
+  } finally {
+    analyzing = false;
   }
-  flags = flags.concat(result.flags).slice(-20);
-  lastAnalyzed = segments.length;
-  renderFlags();
-  updateScores(result.scores);
-  $("summary").textContent = result.summary;
 }
 
 async function runFactCheck(force = false) {
@@ -294,7 +363,7 @@ async function runFactCheck(force = false) {
   }
 }
 
-function startMic() {
+function startListening() {
   stopAll(false);
   resetSession();
   if (navigator.mediaDevices && window.MediaRecorder) {
@@ -307,12 +376,24 @@ function startMic() {
 
 async function startDeepgramMic() {
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaStream = currentMode === "desktop"
+      ? await getDesktopAudioStream()
+      : await navigator.mediaDevices.getUserMedia({ audio: true });
     micActive = true;
     startDeepgramStream();
   } catch {
-    startBrowserMic();
+    if (currentMode === "mic") startBrowserMic();
+    else statusEl.textContent = "Desktop audio unavailable.";
   }
+}
+
+async function getDesktopAudioStream() {
+  if (!navigator.mediaDevices.getDisplayMedia) throw new Error("Desktop capture unsupported.");
+  const stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+  const audioTracks = stream.getAudioTracks();
+  stream.getVideoTracks().forEach((track) => track.stop());
+  if (!audioTracks.length) throw new Error("No desktop audio selected.");
+  return new MediaStream(audioTracks);
 }
 
 function startDeepgramStream() {
@@ -331,7 +412,7 @@ function startDeepgramStream() {
     recorder.start(250);
     analyzeTimer = setInterval(() => runAnalysis(false), 15000);
     factTimer = setInterval(() => runFactCheck(false), 30000);
-    setRunning(true, "Streaming with Deepgram Nova-3");
+    setRunning(true, `Streaming ${currentMode} audio with Deepgram Nova-3`);
   };
   streamSocket.onmessage = (event) => {
     try {
@@ -438,7 +519,10 @@ function escapeHtml(text) {
 }
 
 if (isBrowser) {
-  startBtn.addEventListener("click", startMic);
+  startBtn.addEventListener("click", startListening);
   stopBtn.addEventListener("click", () => stopAll(true));
   demoBtn.addEventListener("click", startDemo);
+  modeButtons.forEach((button) => {
+    button.addEventListener("click", () => setMode(button.dataset.mode));
+  });
 }

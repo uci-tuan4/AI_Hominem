@@ -14,6 +14,10 @@
         <p id="status">Ready</p>
       </div>
       <div class="controls" aria-label="Debate controls">
+        <div class="mode-control" aria-label="Audio source">
+          <button id="micModeBtn" class="mode active" type="button" data-mode="mic">Mic</button>
+          <button id="desktopModeBtn" class="mode" type="button" data-mode="desktop">Desktop</button>
+        </div>
         <button id="startBtn" type="button">Start</button>
         <button id="stopBtn" type="button" disabled>Stop</button>
         <button id="demoBtn" type="button">Demo</button>
@@ -52,18 +56,6 @@
       </section>
     </section>
 
-    <section class="scorecard" aria-label="Speaker scorecard">
-      <div class="score" data-key="clarity"><strong>Clarity</strong><meter min="0" max="10" value="7"></meter><span>7</span></div>
-      <div class="score" data-key="evidence"><strong>Evidence</strong><meter min="0" max="10" value="7"></meter><span>7</span></div>
-      <div class="score" data-key="logic"><strong>Logic</strong><meter min="0" max="10" value="7"></meter><span>7</span></div>
-      <div class="score" data-key="responsiveness"><strong>Answering</strong><meter min="0" max="10" value="7"></meter><span>7</span></div>
-      <div class="score" data-key="civility"><strong>Civility</strong><meter min="0" max="10" value="7"></meter><span>7</span></div>
-    </section>
-
-    <section class="summary" aria-label="Final summary">
-      <h2>Summary</h2>
-      <p id="summary">Analysis appears every 15 seconds and after Stop.</p>
-    </section>
   </main>
 
   <script type="module" src="app.js"></script>
