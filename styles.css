@@ -106,6 +106,12 @@ h3 {
   gap: 10px;
 }
 
+.logo {
+  flex-shrink: 0;
+  border-radius: 8px;
+  display: block;
+}
+
 #status {
   font-size: 12px;
   font-weight: 500;
@@ -226,6 +232,23 @@ button:disabled {
 
 .sensitivity:hover {
   filter: brightness(0.94);
+}
+
+.check-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--label2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.check-control input {
+  accent-color: var(--blue);
+  cursor: pointer;
+  margin: 0;
 }
 
 /* ── Workspace ────────────────────────────────── */

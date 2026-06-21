@@ -10,7 +10,9 @@ const types = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8"
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png"
 };
 
 const port = process.env.PORT || 4173;
@@ -289,11 +291,16 @@ async function transcribe(req, res) {
   json(res, 200, { transcript: extractDeepgramTranscript(result) });
 }
 
-export function normalizeAnalysis(value, minConfidence = 0) {
+export function isHighSeverityIfClaim(flag, highSeverityClaimsOnly) {
+  return !highSeverityClaimsOnly || flag.type !== "unsupported_claim" || flag.severity === "high";
+}
+
+export function normalizeAnalysis(value, minConfidence = 0, highSeverityClaimsOnly = false) {
   return {
     flags: Array.isArray(value?.flags)
       ? value.flags
           .filter((flag) => flag?.type && flag?.quote && (Number(flag.confidence) || 0) >= minConfidence)
+          .filter((flag) => isHighSeverityIfClaim(flag, highSeverityClaimsOnly))
           .slice(0, 5)
       : []
   };
@@ -306,7 +313,7 @@ async function openRouterJson(messages, schema) {
       Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
       "Content-Type": "application/json",
       "HTTP-Referer": `http://${host}:${port}`,
-      "X-Title": "AI Hominem"
+      "X-Title": "AId Hominem"
     },
     body: JSON.stringify({
       model: openRouterModelId(),
@@ -334,7 +341,7 @@ async function analyze(req, res) {
     },
     { role: "user", content: JSON.stringify(payload) }
   ], analysisSchema);
-  json(res, 200, normalizeAnalysis(result, profile.minConfidence));
+  json(res, 200, normalizeAnalysis(result, profile.minConfidence, Boolean(payload.highSeverityClaimsOnly)));
 }
 
 async function browserbase(path, body) {
@@ -429,6 +436,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const server = createServer(handleRequest);
   server.on("upgrade", handleUpgrade);
   server.listen(port, host, () => {
-    console.log(`AI Hominem running at http://${host}:${port}`);
+    console.log(`AId Hominem running at http://${host}:${port}`);
   });
 }

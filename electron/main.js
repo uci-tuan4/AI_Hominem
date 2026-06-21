@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { handleRequest, handleUpgrade } from "../server.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const iconPath = join(root, "assets/icon-256.png");
 let mainWindow;
 let tray;
 let server;
@@ -33,12 +34,11 @@ function startServer() {
 }
 
 function createTray() {
-  const icon = nativeImage.createFromDataURL("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAIElEQVR4AWP4//8/AyUYTFhYGBgYqArYqAoYqAoA0zYEEflFzJkAAAAASUVORK5CYII=");
-  icon.setTemplateImage(true);
+  const icon = nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 });
   tray = new Tray(icon);
-  tray.setToolTip("AI Hominem");
+  tray.setToolTip("AId Hominem");
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Show AI Hominem", click: showMainWindow },
+    { label: "Show AId Hominem", click: showMainWindow },
     { label: "Hide", click: () => mainWindow?.hide() },
     { type: "separator" },
     {
@@ -71,7 +71,8 @@ async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1180,
     height: 780,
-    title: "AI Hominem",
+    title: "AId Hominem",
+    icon: iconPath,
     webPreferences: {
       preload: join(root, "electron/preload.cjs"),
       backgroundThrottling: false,
@@ -89,7 +90,8 @@ async function createWindow() {
 }
 
 loadEnv();
-app.setName("AI Hominem");
+app.setName("AId Hominem");
+app.dock?.setIcon(iconPath);
 
 app.whenReady().then(async () => {
   createTray();
@@ -109,7 +111,7 @@ function notifyWithAppleScript(title, body) {
 }
 
 ipcMain.handle("notify-flag", (_event, flag) => {
-  const title = `AI Hominem: ${String(flag.type || "flag").replaceAll("_", " ")}`;
+  const title = `AId Hominem: ${String(flag.type || "flag").replaceAll("_", " ")}`;
   const body = flag.followUp || "What is the strongest answer to this?";
   // Native Electron notifications silently no-op in an unpackaged dev app on
   // macOS (no bundle id / notification authorization), so route macOS through
@@ -121,7 +123,8 @@ ipcMain.handle("notify-flag", (_event, flag) => {
   if (!Notification.isSupported()) return false;
   const notification = new Notification({
     title,
-    body
+    body,
+    icon: iconPath
   });
   notification.on("click", showMainWindow);
   notification.show();
