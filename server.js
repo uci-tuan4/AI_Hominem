@@ -289,11 +289,16 @@ async function transcribe(req, res) {
   json(res, 200, { transcript: extractDeepgramTranscript(result) });
 }
 
-export function normalizeAnalysis(value, minConfidence = 0) {
+export function isHighSeverityIfClaim(flag, highSeverityClaimsOnly) {
+  return !highSeverityClaimsOnly || flag.type !== "unsupported_claim" || flag.severity === "high";
+}
+
+export function normalizeAnalysis(value, minConfidence = 0, highSeverityClaimsOnly = false) {
   return {
     flags: Array.isArray(value?.flags)
       ? value.flags
           .filter((flag) => flag?.type && flag?.quote && (Number(flag.confidence) || 0) >= minConfidence)
+          .filter((flag) => isHighSeverityIfClaim(flag, highSeverityClaimsOnly))
           .slice(0, 5)
       : []
   };
@@ -334,7 +339,7 @@ async function analyze(req, res) {
     },
     { role: "user", content: JSON.stringify(payload) }
   ], analysisSchema);
-  json(res, 200, normalizeAnalysis(result, profile.minConfidence));
+  json(res, 200, normalizeAnalysis(result, profile.minConfidence, Boolean(payload.highSeverityClaimsOnly)));
 }
 
 async function browserbase(path, body) {

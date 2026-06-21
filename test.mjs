@@ -40,6 +40,16 @@ const confidenceFlags = { flags: [
 ] };
 assert.equal(normalizeAnalysis(confidenceFlags).flags.length, 2);
 assert.equal(normalizeAnalysis(confidenceFlags, 0.6).flags.length, 1);
+const severityFlags = { flags: [
+  { type: "unsupported_claim", quote: "a", confidence: 0.9, severity: "medium" },
+  { type: "unsupported_claim", quote: "b", confidence: 0.9, severity: "high" },
+  { type: "ad_hominem", quote: "c", confidence: 0.9, severity: "low" }
+] };
+// high-severity-claims-only keeps high unsupported_claim + all other types
+assert.deepEqual(
+  normalizeAnalysis(severityFlags, 0, true).flags.map((flag) => flag.quote),
+  ["b", "c"]
+);
 assert.equal(mergeNewFlags(shortUnsupported.flags, shortUnsupported.flags).length, 0);
 assert.equal(mergeNewFlags(shortUnsupported.flags, [{
   ...shortUnsupported.flags[0],

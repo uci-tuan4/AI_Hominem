@@ -81,6 +81,7 @@ const startBtn = isBrowser ? $("startBtn") : null;
 const stopBtn = isBrowser ? $("stopBtn") : null;
 const demoBtn = isBrowser ? $("demoBtn") : null;
 const sensitivityEl = isBrowser ? $("sensitivity") : null;
+const highSeverityClaimsEl = isBrowser ? $("highSeverityClaims") : null;
 const modeButtons = isBrowser ? Array.from(document.querySelectorAll(".mode")) : [];
 
 function words(text) {
@@ -309,7 +310,8 @@ async function runAnalysis(force = false) {
     recentTranscript: recentTranscript || contextTranscript,
     contextTranscript,
     previousFlags: flags.slice(-10).map((flag) => `${flag.type}: ${flag.quote}`),
-    sensitivity: sensitivityEl?.value || "medium"
+    sensitivity: sensitivityEl?.value || "medium",
+    highSeverityClaimsOnly: Boolean(highSeverityClaimsEl?.checked)
   };
   const localResult = analyzeTranscript(payload.recentTranscript, contextTranscript, flags);
   let result;
@@ -325,7 +327,11 @@ async function runAnalysis(force = false) {
     } catch {
       result = localResult;
     }
-    result.flags = mergeNewFlags(flags, localResult.flags.concat(result.flags || []));
+    let candidates = localResult.flags.concat(result.flags || []);
+    if (payload.highSeverityClaimsOnly) {
+      candidates = candidates.filter((flag) => flag.type !== "unsupported_claim" || flag.severity === "high");
+    }
+    result.flags = mergeNewFlags(flags, candidates);
     flags = flags.concat(result.flags).slice(-20);
     lastAnalyzed = segments.length;
     renderFlags();
