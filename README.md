@@ -1,4 +1,4 @@
-# AI Hominem
+# AId Hominem
 
 A live debate coach that transcribes speech, flags logical fallacies, and fact-checks claims in real time.
 

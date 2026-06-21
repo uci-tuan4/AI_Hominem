@@ -18,7 +18,7 @@ assert(electronMain.includes("setDisplayMediaRequestHandler"));
 assert(electronMain.includes("new Notification("));
 assert(electronMain.includes('display notification ${quotedBody} with title ${quotedTitle}'));
 assert(electronMain.includes('notification.on("click", showMainWindow)'));
-assert(electronMain.includes('const title = `AI Hominem: ${String(flag.type || "flag").replaceAll("_", " ")}`'));
+assert(electronMain.includes('const title = `AId Hominem: ${String(flag.type || "flag").replaceAll("_", " ")}`'));
 assert(electronMain.includes('const body = flag.followUp || "What is the strongest answer to this?"'));
 assert(electronPreload.includes("notifyFlag"));
 

@@ -1,9 +1,18 @@
 const demoLines = [
-  "If we let students use AI, nobody will learn anything anymore. Teachers will become useless, schools will collapse, and employers will never trust graduates again.",
-  "The other side only supports AI because they do not care whether students can think for themselves.",
-  "My cousin used an AI tutor and passed calculus, so clearly every school should replace homework with AI coaching.",
-  "Either we ban AI from classrooms completely or we accept that cheating is now normal.",
-  "I am not saying there are no benefits, but nobody has shown how schools will preserve original thinking at scale."
+  { text: "If we let students use AI, nobody will learn anything anymore. Teachers will become useless, schools will collapse, and employers will never trust graduates again." },
+  { text: "The other side only supports AI because they do not care whether students can think for themselves." },
+  {
+    text: "And the evidence is obvious: Finland banned smartphones from every classroom back in 2015 and immediately became the number one country in the world for math.",
+    fact: {
+      claim: "Finland banned smartphones in all classrooms in 2015 and became number one in global math rankings.",
+      verdict: "contradicted",
+      explanation: "Finland moved to restrict phones in 2024–25, not 2015, and ranks high but not first in PISA math.",
+      sources: [{ title: "OECD — Programme for International Student Assessment (PISA)", url: "https://www.oecd.org/en/about/programmes/pisa.html" }]
+    }
+  },
+  { text: "My cousin used an AI tutor and passed calculus, so clearly every school should replace homework with AI coaching." },
+  { text: "Either we ban AI from classrooms completely or we accept that cheating is now normal." },
+  { text: "I am not saying there are no benefits, but nobody has shown how schools will preserve original thinking at scale." }
 ];
 
 const rules = [
@@ -62,6 +71,8 @@ let micActive = false;
 let analyzeTimer;
 let factTimer;
 let demoTimer;
+let demoFactTimer;
+let demoActive = false;
 let lastAnalyzed = 0;
 let lastFactChecked = 0;
 let partialText = "";
@@ -145,13 +156,14 @@ async function notifyFlags(newFlags) {
     if (window.aiHominem?.notifyFlag) {
       window.aiHominem.notifyFlag(flag);
     } else if ("Notification" in window && Notification.permission === "granted") {
-      new Notification(`AI Hominem: ${flagTitle(flag)}`, {
-        body: counterQuestion(flag)
+      new Notification(`AId Hominem: ${flagTitle(flag)}`, {
+        body: counterQuestion(flag),
+        icon: "assets/icon-256.png"
       });
     } else if ("Notification" in window && Notification.permission === "default") {
       const permission = await Notification.requestPermission();
       if (permission === "granted") {
-        new Notification(`AI Hominem: ${flagTitle(flag)}`, {
+        new Notification(`AId Hominem: ${flagTitle(flag)}`, {
           body: counterQuestion(flag)
         });
       }
@@ -487,28 +499,133 @@ function startBrowserMic() {
   setRunning(true, "Listening");
 }
 
+// Demo mode scripts its fact-checks so the Facts panel always populates on
+// stage — no API keys, network, or per-claim luck required. Live mode (Start)
+// still uses the real /api/fact-check pipeline.
+function injectDemoFact(fact) {
+  facts = facts.concat({ claim: fact.claim, verdict: "checking", explanation: "Searching sources…", sources: [] }).slice(-20);
+  renderFacts();
+  demoFactTimer = setTimeout(() => {
+    facts = facts.map((existing) =>
+      existing.claim === fact.claim && existing.verdict === "checking" ? fact : existing
+    );
+    renderFacts();
+  }, 1600);
+}
+
+function pickDemoVoice() {
+  const synth = isBrowser ? window.speechSynthesis : null;
+  if (!synth) return null;
+  const voices = synth.getVoices();
+  return voices.find((v) => /en[-_]US/i.test(v.lang) && /natural|google|samantha|aaron/i.test(v.name))
+    || voices.find((v) => /^en/i.test(v.lang))
+    || voices[0]
+    || null;
+}
+
+const betweenSentenceMs = 450;
+
+function splitSentences(text) {
+  return (text.match(/[^.!?]+[.!?]*\s*/g) || [text]).filter((s) => s.trim());
+}
+
+// Speaks one line aloud, sentence by sentence with a small wait between
+// sentences, revealing the spoken words in the transcript as an interim
+// segment. Falls back to a length-based timer when the Web Speech API is
+// unavailable so the demo still paces naturally.
+function speakDemoLine(text, onProgress, onEnd) {
+  const synth = isBrowser ? window.speechSynthesis : null;
+  if (!synth || typeof SpeechSynthesisUtterance === "undefined") {
+    onProgress(text);
+    demoTimer = setTimeout(onEnd, Math.min(7000, 1400 + text.length * 38));
+    return;
+  }
+  const sentences = splitSentences(text);
+  let spokenSoFar = "";
+  let index = 0;
+  const speakNext = () => {
+    if (!demoActive) return;
+    if (index >= sentences.length) {
+      onEnd();
+      return;
+    }
+    const sentence = sentences[index];
+    const base = spokenSoFar;
+    const utterance = new SpeechSynthesisUtterance(sentence.trim());
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    const voice = pickDemoVoice();
+    if (voice) utterance.voice = voice;
+    utterance.onboundary = (event) => {
+      const end = event.charLength
+        ? event.charIndex + event.charLength
+        : (sentence.indexOf(" ", event.charIndex) + 1 || sentence.length);
+      onProgress(base + sentence.slice(0, end));
+    };
+    utterance.onend = () => {
+      if (!demoActive) return;
+      spokenSoFar = base + sentence;
+      onProgress(spokenSoFar);
+      index++;
+      if (index >= sentences.length) {
+        onEnd();
+        return;
+      }
+      demoTimer = setTimeout(speakNext, betweenSentenceMs);
+    };
+    utterance.onerror = utterance.onend;
+    synth.speak(utterance);
+  };
+  speakNext();
+}
+
+function runDemoSequence(index) {
+  if (!demoActive) return;
+  if (index >= demoLines.length) {
+    stopAll(true);
+    return;
+  }
+  const line = demoLines[index];
+  partialText = "";
+  speakDemoLine(
+    line.text,
+    (spoken) => {
+      partialText = spoken;
+      renderTranscript();
+    },
+    () => {
+      if (!demoActive) return;
+      partialText = "";
+      addSegment(line.text);
+      runAnalysis(true);
+      if (line.fact) injectDemoFact(line.fact);
+      demoTimer = setTimeout(() => runDemoSequence(index + 1), 700);
+    }
+  );
+}
+
 function startDemo() {
   stopAll(false);
   resetSession();
+  demoActive = true;
   setRunning(true, "Demo running");
-  let index = 0;
-  demoTimer = setInterval(() => {
-    addSegment(demoLines[index]);
-    runAnalysis(true);
-    runFactCheck(true);
-    index++;
-    if (index === demoLines.length) stopAll(true);
-  }, 1800);
+  runDemoSequence(0);
 }
 
 function stopAll(finalize = true) {
   micActive = false;
+  // Clear demo state before cancelling speech: cancel() can fire the
+  // utterance's onend, which must see demoActive=false and bail out.
+  const wasDemo = demoActive;
+  demoActive = false;
   if (recognition) recognition.stop();
   if (recorder && recorder.state !== "inactive") recorder.stop();
   if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
   clearInterval(analyzeTimer);
   clearInterval(factTimer);
   clearInterval(demoTimer);
+  clearTimeout(demoFactTimer);
+  if (isBrowser && window.speechSynthesis) window.speechSynthesis.cancel();
   recognition = null;
   recorder = null;
   mediaStream = null;
@@ -516,8 +633,8 @@ function stopAll(finalize = true) {
   streamSocket = null;
   partialText = "";
   renderTranscript();
-  if (finalize) runAnalysis(true);
-  if (finalize) runFactCheck(true);
+  if (finalize && !wasDemo) runAnalysis(true);
+  if (finalize && !wasDemo) runFactCheck(true);
   setRunning(false, segments.length ? "Stopped" : "Ready");
 }
 

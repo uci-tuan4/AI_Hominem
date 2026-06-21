@@ -106,6 +106,12 @@ h3 {
   gap: 10px;
 }
 
+.logo {
+  flex-shrink: 0;
+  border-radius: 8px;
+  display: block;
+}
+
 #status {
   font-size: 12px;
   font-weight: 500;
