@@ -16,6 +16,30 @@ const types = {
 const port = process.env.PORT || 4173;
 const host = "127.0.0.1";
 const defaultOpenRouterModel = "google/gemini-3.1-flash-lite";
+
+// Controls how aggressively the analyzer flags claims. Override with
+// ANALYSIS_SENSITIVITY=low|medium|high (default: medium). `minConfidence` is a
+// hard post-filter; `guidance` steers the model's own threshold.
+const sensitivityProfiles = {
+  low: {
+    minConfidence: 0.8,
+    guidance: "Be conservative: flag only egregious, clear-cut fallacies and central claims asserted as fact with no support whatsoever. Ignore hedged, qualified, or offhand statements. When in doubt, do not flag."
+  },
+  medium: {
+    minConfidence: 0.6,
+    guidance: "Flag substantive unsupported claims and clear fallacies. Skip trivial, hedged, or well-qualified statements."
+  },
+  high: {
+    minConfidence: 0,
+    guidance: "Flag every factual claim stated without evidence and any potential fallacy, even minor ones."
+  }
+};
+
+export function analysisProfile(name) {
+  const key = String(name || process.env.ANALYSIS_SENSITIVITY || "medium").toLowerCase();
+  return sensitivityProfiles[key] || sensitivityProfiles.medium;
+}
+
 const claimSchema = {
   type: "object",
   properties: {
@@ -265,10 +289,12 @@ async function transcribe(req, res) {
   json(res, 200, { transcript: extractDeepgramTranscript(result) });
 }
 
-export function normalizeAnalysis(value) {
+export function normalizeAnalysis(value, minConfidence = 0) {
   return {
     flags: Array.isArray(value?.flags)
-      ? value.flags.filter((flag) => flag?.type && flag?.quote).slice(0, 5)
+      ? value.flags
+          .filter((flag) => flag?.type && flag?.quote && (Number(flag.confidence) || 0) >= minConfidence)
+          .slice(0, 5)
       : []
   };
 }
@@ -300,14 +326,15 @@ async function analyze(req, res) {
   }
 
   const payload = JSON.parse((await readBody(req)).toString() || "{}");
+  const profile = analysisProfile(payload.sensitivity);
   const result = await openRouterJson([
     {
       role: "system",
-      content: "You are a live debate coach. Flag factual claims stated without evidence as unsupported_claim, even if fact-checking handles truth separately. Use only concise flag objects."
+      content: `You are a live debate coach. Flag logical fallacies and factual claims stated without evidence as unsupported_claim, even if fact-checking handles truth separately. ${profile.guidance} Set confidence (0-1) to how sure you are the flag is warranted. Use only concise flag objects.`
     },
     { role: "user", content: JSON.stringify(payload) }
   ], analysisSchema);
-  json(res, 200, normalizeAnalysis(result));
+  json(res, 200, normalizeAnalysis(result, profile.minConfidence));
 }
 
 async function browserbase(path, body) {

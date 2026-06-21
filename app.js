@@ -80,6 +80,7 @@ const factsEl = isBrowser ? $("facts") : null;
 const startBtn = isBrowser ? $("startBtn") : null;
 const stopBtn = isBrowser ? $("stopBtn") : null;
 const demoBtn = isBrowser ? $("demoBtn") : null;
+const sensitivityEl = isBrowser ? $("sensitivity") : null;
 const modeButtons = isBrowser ? Array.from(document.querySelectorAll(".mode")) : [];
 
 function words(text) {
@@ -185,6 +186,7 @@ export function analyzeTranscript(recentTranscript, contextTranscript = recentTr
 
 function setRunning(running, label) {
   statusEl.textContent = label;
+  statusEl.classList.toggle("listening", running);
   startBtn.disabled = running;
   stopBtn.disabled = !running;
   modeButtons.forEach((button) => {
@@ -306,7 +308,8 @@ async function runAnalysis(force = false) {
   const payload = {
     recentTranscript: recentTranscript || contextTranscript,
     contextTranscript,
-    previousFlags: flags.slice(-10).map((flag) => `${flag.type}: ${flag.quote}`)
+    previousFlags: flags.slice(-10).map((flag) => `${flag.type}: ${flag.quote}`),
+    sensitivity: sensitivityEl?.value || "medium"
   };
   const localResult = analyzeTranscript(payload.recentTranscript, contextTranscript, flags);
   let result;
