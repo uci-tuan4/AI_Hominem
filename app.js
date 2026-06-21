@@ -94,6 +94,11 @@ const demoBtn = isBrowser ? $("demoBtn") : null;
 const sensitivityEl = isBrowser ? $("sensitivity") : null;
 const highSeverityClaimsEl = isBrowser ? $("highSeverityClaims") : null;
 const modeButtons = isBrowser ? Array.from(document.querySelectorAll(".mode")) : [];
+const connectorEl = isBrowser ? $("connector") : null;
+const connectorPath = isBrowser ? $("connectorPath") : null;
+const connectorDotA = isBrowser ? $("connectorDotA") : null;
+const connectorDotB = isBrowser ? $("connectorDotB") : null;
+let activeLink = null;
 
 function words(text) {
   return text.trim().split(/\s+/).filter(Boolean);
@@ -265,8 +270,9 @@ function renderTranscript() {
 }
 
 function renderFlags() {
+  clearLink();
   flagsEl.innerHTML = "";
-  const latest = flags.slice(-5).reverse();
+  const latest = flags.slice().reverse();
   if (!latest.length) {
     flagsEl.innerHTML = '<p class="empty">No issues flagged yet.</p>';
   } else {
@@ -280,10 +286,73 @@ function renderFlags() {
         <p class="follow-up">${escapeHtml(flag.followUp)}</p>
         <p class="meta">${flag.severity} severity · ${Math.round(flag.confidence * 100)}% confidence</p>
       `;
+      card._quote = flag.quote;
+      card.addEventListener("mouseenter", () => showLink(card));
+      card.addEventListener("mouseleave", clearLink);
       flagsEl.append(card);
     }
   }
   $("flagCount").textContent = `${flags.length} flag${flags.length === 1 ? "" : "s"}`;
+}
+
+// Finds the transcript segment a flag's quote came from, preferring an exact
+// substring match and falling back to the segment with the most shared words.
+function findSegmentEl(quote) {
+  const target = normalizeQuote(quote);
+  if (!target) return null;
+  const targetWords = new Set(target.split(" "));
+  let best = null;
+  let bestScore = 0;
+  for (const segEl of transcriptEl.querySelectorAll(".segment")) {
+    const text = normalizeQuote(segEl.textContent);
+    if (!text) continue;
+    let score;
+    if (text.includes(target)) score = target.length;
+    else if (target.includes(text) && text.length > 8) score = text.length;
+    else score = text.split(" ").filter((w) => targetWords.has(w)).length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = segEl;
+    }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+function showLink(card) {
+  const segEl = findSegmentEl(card._quote);
+  if (!segEl) return;
+  segEl.scrollIntoView({ block: "nearest" });
+  requestAnimationFrame(() => {
+    activeLink = { card, segEl };
+    card.classList.add("linked");
+    segEl.classList.add("linked");
+    positionLink();
+  });
+}
+
+function positionLink() {
+  if (!activeLink) return;
+  const c = activeLink.card.getBoundingClientRect();
+  const s = activeLink.segEl.getBoundingClientRect();
+  const x1 = c.left;
+  const y1 = c.top + c.height / 2;
+  const x2 = s.right;
+  const y2 = s.top + s.height / 2;
+  const dx = Math.max(40, (x1 - x2) * 0.5);
+  connectorPath.setAttribute("d", `M ${x2} ${y2} C ${x2 + dx} ${y2}, ${x1 - dx} ${y1}, ${x1} ${y1}`);
+  connectorDotA.setAttribute("cx", x2);
+  connectorDotA.setAttribute("cy", y2);
+  connectorDotB.setAttribute("cx", x1);
+  connectorDotB.setAttribute("cy", y1);
+  connectorEl.classList.add("active");
+}
+
+function clearLink() {
+  if (!activeLink) return;
+  activeLink.card.classList.remove("linked");
+  activeLink.segEl.classList.remove("linked");
+  activeLink = null;
+  connectorEl?.classList.remove("active");
 }
 
 function renderFacts() {
@@ -344,7 +413,7 @@ async function runAnalysis(force = false) {
       candidates = candidates.filter((flag) => flag.type !== "unsupported_claim" || flag.severity === "high");
     }
     result.flags = mergeNewFlags(flags, candidates);
-    flags = flags.concat(result.flags).slice(-20);
+    flags = flags.concat(result.flags);
     lastAnalyzed = segments.length;
     renderFlags();
     notifyFlags(result.flags);
@@ -651,4 +720,7 @@ if (isBrowser) {
   modeButtons.forEach((button) => {
     button.addEventListener("click", () => setMode(button.dataset.mode));
   });
+  transcriptEl.addEventListener("scroll", positionLink);
+  flagsEl.addEventListener("scroll", positionLink);
+  window.addEventListener("resize", positionLink);
 }

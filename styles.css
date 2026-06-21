@@ -420,6 +420,56 @@ button:disabled {
   margin-top: 6px;
 }
 
+/* ── Flag → transcript connector ──────────────── */
+
+.connector {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 50;
+  overflow: visible;
+}
+
+.connector path {
+  fill: none;
+  stroke: var(--blue);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.connector circle {
+  fill: var(--blue);
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.connector.active path,
+.connector.active circle {
+  opacity: 0.9;
+}
+
+.flag {
+  cursor: default;
+  transition: box-shadow 150ms ease;
+}
+
+.flag.linked {
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.35);
+}
+
+.segment.linked {
+  background: var(--blue-light);
+  margin: 0 -18px;
+  padding: 9px 18px;
+  border-bottom: none;
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.25);
+}
+
 /* ── Responsive ───────────────────────────────── */
 
 @media (max-width: 860px) {
